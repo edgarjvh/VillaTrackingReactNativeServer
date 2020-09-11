@@ -1,0 +1,10 @@
+{
+    "name": "VillaTrackingServer",
+    "script": "src/index.js",
+    "watch": true,
+    "autorestart": true,
+    "restart_delay": 2000,
+    "ignore_watch": [
+        "node_modules"
+    ]
+}
