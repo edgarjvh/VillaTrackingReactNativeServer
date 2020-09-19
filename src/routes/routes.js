@@ -8,6 +8,7 @@ const geolib = require('geolib');
 
 const myConnection = require('./../database');
 const e = require('express');
+const { exitCode } = require('process');
 
 router.get('/', (req, res) => {
 
@@ -37,8 +38,6 @@ router.post('/registerUser', (req, res) => {
                         result: 'ERROR'
                     })
                 } else {
-                    console.log(result);
-
                     const transporter = nodemailer.createTransport({
                         host: 'smtp.gmail.com',
                         port: 587,
@@ -285,7 +284,7 @@ router.post('/saveGroup', (req, res) => {
 
     let { groupId, name, isActive, userId } = req.body;
 
-    myConnection.query('SELECT * from villatrackingserverdb.groups WHERE user_id = ? AND name = ?;', [userId, name], (err, rows) => {
+    myConnection.query('SELECT * from villatrackingserver.groups WHERE user_id = ? AND name = ?;', [userId, name], (err, rows) => {
         if (rows.length > 0) {
             if (groupId > 0) {
                 if (rows[0].id !== groupId) {
@@ -301,12 +300,12 @@ router.post('/saveGroup', (req, res) => {
         }
 
         let query = groupId === 0 ? `
-            INSERT INTO villatrackingserverdb.groups (user_id,name,status) VALUES (?,?,?);
+            INSERT INTO villatrackingserver.groups (user_id,name,status) VALUES (?,?,?);
         `
             :
 
             `
-            UPDATE villatrackingserverdb.groups SET name = ?, status = ? WHERE id = ?;
+            UPDATE villatrackingserver.groups SET name = ?, status = ? WHERE id = ?;
         `
             ;
 
@@ -318,9 +317,6 @@ router.post('/saveGroup', (req, res) => {
             [
                 name, isActive ? 1 : 0, groupId
             ];
-
-        console.log(query);
-        console.log(data);
 
         myConnection.query(query, data, (err, result) => {
             if (err) {
@@ -353,7 +349,7 @@ router.post('/deleteGroup', (req, res) => {
     let { groupId, userId } = req.body
 
     let query = `
-        DELETE FROM villatrackingserverdb.groups WHERE id = ?;
+        DELETE FROM villatrackingserver.groups WHERE id = ?;
     `;
 
     myConnection.query(query, [groupId], (err, result) => {
@@ -377,7 +373,7 @@ router.post('/deleteGroup', (req, res) => {
 })
 
 router.post('/deleteDevice', (req, res) => {
-    let {deviceId, userId} = req.body;
+    let { deviceId, userId } = req.body;
 
     let query = `
         DELETE FROM devices WHERE id = ?
@@ -409,13 +405,154 @@ router.post('/getDevicesPayload', (req, res) => {
     (async () => {
         let response = {};
         try {
-            response = await getPayload(id);
+            let _res = await getPayload(id);
+            response = _res;
         } finally {
             response.result = 'OK';
             return res.send(response);
         }
     })()
+})
 
+router.post('/deleteGeofence', (req, res) => {
+    let {
+        userId,
+        geofenceId
+    } = req.body;
+
+    let query = 'DELETE FROM geofences WHERE id = ?';
+
+    myConnection.query(query, [geofenceId], (err, result) => {
+        if (err) {
+            return res.send({
+                result: 'ERROR',
+                data: err
+            })
+        }
+
+        (async () => {
+            let response = {};
+            try {
+                let _res = await getPayload(userId);
+                response = _res;
+            } finally {
+                response.result = 'OK';
+                return res.send(response);
+            }
+        })()
+    })
+})
+
+router.post('/saveGeofence', (req, res) => {
+    let {
+        userId,
+        geofenceId,
+        geofenceName,
+        geofenceDescription,
+        geofenceType,
+        geofenceColor,
+        geofencePoints,
+        geofenceCenter,
+        geofenceRadius,
+        geofenceEnabled
+    } = req.body;
+    
+    let existQuery = 'SELECT * FROM geofences WHERE LOWER(name) = ? AND user_id = ?';  
+
+    myConnection.query(existQuery, [geofenceName.toLowerCase(), userId], (err, geofences) => {
+        if (err) {
+            return res.send({
+                result: 'ERROR',
+                data: err
+            })
+        }
+
+        if (geofences.length > 0) {
+            if (geofenceId > 0) {
+                if (geofences[0].id !== geofenceId) {
+                    return res.send({
+                        result: 'DUPLICATE'
+                    })
+                }
+            } else {
+                return res.send({
+                    result: 'DUPLICATE'
+                })
+            }
+        }
+
+        let query = geofenceId > 0 ?
+            `
+            UPDATE geofences SET 
+                name = ?,
+                description = ?,
+                type = ?,
+                color = ?,
+                points = ?,
+                center = ?,
+                radius = ?,
+                status = ? 
+            WHERE id = ?
+        `
+            :
+            `
+            INSERT INTO geofences 
+            (user_id,name,description,type,color,points,center,radius,status) VALUES (?,?,?,?,?,?,?,?,?)
+        `;
+
+        let data = geofenceId > 0 ?
+            [
+                geofenceName,
+                geofenceDescription,
+                geofenceType,
+                geofenceColor,
+                geofencePoints,
+                geofenceCenter,
+                geofenceRadius,
+                geofenceEnabled,
+                geofenceId
+            ]
+            :
+            [
+                userId,
+                geofenceName,
+                geofenceDescription,
+                geofenceType,
+                geofenceColor,
+                geofencePoints,
+                geofenceCenter,
+                geofenceRadius,
+                geofenceEnabled,
+            ];
+
+
+        myConnection.query(query, data, (err, result) => {
+            if (err) {
+                return res.send({
+                    result: 'ERROR',
+                    data: err
+                })
+            }
+
+
+            if (result.affectedRows > 0) {
+                (async () => {
+                    let response = {};
+                    try {
+                        response = await getPayload(userId);
+                    } finally {
+                        response.result = geofenceId > 0 ? 'UPDATED' : 'SAVED';
+                        return res.send(response);
+                    }
+                })()
+
+            } else {
+                return res.send({
+                    result: 'NO SAVE'
+                })
+            }
+        })
+    })
 })
 
 router.post('/saveDevice', (req, res) => {
@@ -545,6 +682,106 @@ router.post('/saveDevice', (req, res) => {
             })
         }
     })
+})
+
+router.post('/saveGroupDevices', (req, res) => {
+    console.log(req.body);
+
+    let { groupId, userId, ids } = req.body;
+
+    let query = util.promisify(myConnection.query).bind(myConnection);
+
+    let sql = 'INSERT INTO groups_devices (group_id, device_id) VALUES (?,?)';
+
+    for (let i = 0; i < ids.length; i++) {
+        let id = ids[i];
+
+        if (id > 0) {
+            query(sql, [groupId, id])
+        }
+    }
+
+    (async () => {
+        let response = {};
+        try {
+            response = await getPayload(userId);
+        } finally {
+            response.result = 'OK';
+            return res.send(response);
+        }
+    })()
+})
+
+router.post('/saveGeofenceDevices', (req, res) => {   
+
+    let { geofenceId, userId, ids } = req.body;
+
+    let query = util.promisify(myConnection.query).bind(myConnection);
+
+    let sql = 'INSERT INTO geofences_devices (geofence_id, device_id) VALUES (?,?)';
+
+    for (let i = 0; i < ids.length; i++) {
+        let id = ids[i];
+
+        if (id > 0) {
+            query(sql, [geofenceId, id])
+        }
+    }
+
+    (async () => {
+        let response = {};
+        try {
+            response = await getPayload(userId);
+        } finally {
+            response.result = 'OK';
+            return res.send(response);
+        }
+    })()
+})
+
+router.post('/deleteGroupDevices', (req, res) => {
+    console.log(req.body)
+    let { ids, groupId, userId } = req.body;
+
+    let query = util.promisify(myConnection.query).bind(myConnection);
+
+    let deleteQuery = 'DELETE FROM groups_devices WHERE group_id = ? AND device_id = ?';
+
+    for (let i = 0; i < ids.length; i++) {
+        query(deleteQuery, [groupId, ids[i]])
+    }
+
+    (async () => {
+        let response = {};
+        try {
+            response = await getPayload(userId);
+        } finally {
+            response.result = 'OK';
+            return res.send(response);
+        }
+    })()
+})
+
+router.post('/deleteGeofenceDevices', (req, res) => {    
+    let { ids, geofenceId, userId } = req.body;
+
+    let query = util.promisify(myConnection.query).bind(myConnection);
+
+    let deleteQuery = 'DELETE FROM geofences_devices WHERE geofence_id = ? AND device_id = ?';
+
+    for (let i = 0; i < ids.length; i++) {
+        query(deleteQuery, [geofenceId, ids[i]])
+    }
+
+    (async () => {
+        let response = {};
+        try {
+            response = await getPayload(userId);
+        } finally {
+            response.result = 'OK';
+            return res.send(response);
+        }
+    })()
 })
 
 router.post('/getDeviceHistory', (req, res) => {
@@ -1195,9 +1432,6 @@ router.post('/getDistance', (req, res) => {
         { latitude: 10.314578, longitude: -71.405725 }
     )
 
-    console.log(new Date(650 * 1000).toISOString().substr(11, 8))
-
-
     return res.send({
         result: 'OK',
         distance: distance
@@ -1210,9 +1444,11 @@ async function getPayload(userId) {
 
     const devicesQuery = 'SELECT * FROM devices WHERE user_id = ?';
     const geofencesQuery = 'SELECT * FROM geofences WHERE user_id = ?';
-    const groupsQuery = 'SELECT * FROM villatrackingserverdb.groups WHERE user_id = ? ORDER BY name ASC;';
-    const groupDevicesQuery = 'SELECT * FROM devices d LEFT JOIN groups_devices gd ON d.id = gd.device_id WHERE gd.group_id = ?';
-
+    const geofenceDevicesQuery = 'SELECT d.*, gd.last_status FROM devices d LEFT JOIN geofences_devices gd ON d.id = gd.device_id WHERE gd.geofence_id = ?';
+    const groupsQuery = 'SELECT * FROM villatrackingserver.groups WHERE user_id = ? ORDER BY name ASC;';
+    const groupDevicesQuery = 'SELECT d.* FROM devices d LEFT JOIN groups_devices gd ON d.id = gd.device_id WHERE gd.group_id = ?';
+    const deviceGroupsQuery = 'SELECT g.* FROM villatrackingserver.groups g LEFT JOIN groups_devices gd ON g.id = gd.group_id WHERE gd.device_id = ?';
+    const deviceGeofencesQuery = 'SELECT g.*, gd.last_status FROM geofences g LEFT JOIN geofences_devices gd ON g.id = gd.geofence_id WHERE gd.device_id = ?';
     const devicesModelsQuery = 'SELECT * FROM device_models';
     const tracesQuery = 'SELECT t.* FROM traces AS t LEFT JOIN devices AS d ON t.imei = d.imei WHERE d.id = ? ORDER BY t.date_time DESC LIMIT 10';
     const alertsQuery = 'SELECT a.* FROM alerts AS a LEFT JOIN devices AS d ON a.imei = d.imei WHERE d.id = ? AND DATE(a.date_time) = CURDATE()';
@@ -1226,29 +1462,60 @@ async function getPayload(userId) {
     };
 
     response.deviceModels = await query(devicesModelsQuery);
+
     let groups = await query(groupsQuery, [userId]);
 
     for (let i = 0; i < groups.length; i++) {
         let group = groups[i];
 
         let groupDevices = await query(groupDevicesQuery, [group.id]);
-        group.devices = groupDevices;
+        group.devices = groupDevices.map(device => {
+            return device['id'];
+        })
 
         response.groups.push(group);
     }
 
-    response.geofences = await query(geofencesQuery, [userId])
+    let geofences = await query(geofencesQuery, [userId])
+
+    for (let i = 0; i < geofences.length; i++) {
+        let geofence = geofences[i];
+
+        let geofenceDevices = await query(geofenceDevicesQuery, [geofence.id]);
+        geofence.devices = geofenceDevices.map(device => {
+            return device['id'];
+        })
+
+        response.geofences.push(geofence);
+    }
 
     let devices = await query(devicesQuery, [userId]);
 
     for (let i = 0; i < devices.length; i++) {
         let device = devices[i];
 
-        let traces = await query(tracesQuery, [device.id]);
-        device.traces = traces;
+        device.isSelectedInGroups = false;
 
-        let alerts = await query(alertsQuery, [device.id]);
-        device.alerts = alerts;
+        let deviceGroups = await query(deviceGroupsQuery, [device.id]);
+        device.groups = deviceGroups.map(group => {
+            return group['id'];
+        });
+
+        device.isSelectedInGeofences = false;
+
+        let deviceGeofences = await query(deviceGeofencesQuery, [device.id]);
+        device.geofences = deviceGeofences.map(geofence => {
+            return {
+                id: geofence['id'],
+                lastStatus: geofence['last_status']
+            };
+        })
+
+        let deviceTraces = await query(tracesQuery, [device.id]);
+        device.traces = deviceTraces;
+
+        let deviceAlerts = await query(alertsQuery, [device.id]);
+        device.alerts = deviceAlerts;
 
         response.devices.push(device);
     }
@@ -1265,6 +1532,5 @@ function generateCode(length) {
     }
     return result;
 }
-
 
 module.exports = router;
